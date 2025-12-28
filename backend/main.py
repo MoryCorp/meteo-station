@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -22,6 +22,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Middleware pour empêcher le cache navigateur sur les endpoints API
+@app.middleware("http")
+async def add_no_cache_headers(request: Request, call_next):
+    response = await call_next(request)
+
+    # Ajouter headers anti-cache uniquement pour les endpoints /api/*
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+
+    return response
 
 def calculate_pressure_trend(current_pressure: float, history_data: List[Dict]) -> Dict[str, Any]:
     """Calcule la tendance de pression sur 3h (36 observations de 5 minutes)"""

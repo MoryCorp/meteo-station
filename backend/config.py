@@ -13,12 +13,12 @@ NEIGHBORING_STATIONS = ["IGAROU16", "IGAROU15", "IGAROU14", "IGAROU3", "IGAROU9"
 
 COORDS_GAREOULT = {"lat": 43.3279, "lon": 6.0456}
 
-# Cache TTL en secondes
+# Cache TTL en secondes (backend in-memory cache)
 CACHE_TTL = {
-    "current": 60,            # 1 minute pour station principale (< refresh frontend)
+    "current": 300,           # 5 minutes pour station principale
     "current_neighbors": 900, # 15 minutes pour stations voisines
-    "history": 600,           # 10 minutes
-    "forecast": 3600          # 1 heure
+    "history": 900,           # 15 minutes pour historique
+    "forecast": 3600          # 1 heure pour prévisions
 }
 
 # Seuils d'alerte
