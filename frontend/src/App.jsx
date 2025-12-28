@@ -1,6 +1,15 @@
 import { useState, useEffect } from 'react'
 import { ComposedChart, LineChart, Line, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 
+// Convert wind direction in degrees to cardinal direction
+function getCardinalDirection(degrees) {
+  if (degrees == null || degrees < 0) return ''
+
+  const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+  const index = Math.round(((degrees % 360) / 22.5))
+  return directions[index % 16]
+}
+
 function App() {
   const [current, setCurrent] = useState(null)
   const [forecast, setForecast] = useState(null)
@@ -501,9 +510,10 @@ function App() {
                 <YAxis
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 12 }}
-                  label={{ value: 'Degrés', angle: -90, position: 'insideLeft', fill: '#6b7280' }}
+                  label={{ value: 'Direction', angle: -90, position: 'insideLeft', fill: '#6b7280' }}
                   domain={[0, 360]}
                   ticks={[0, 45, 90, 135, 180, 225, 270, 315, 360]}
+                  tickFormatter={(value) => `${value}° (${getCardinalDirection(value)})`}
                 />
                 <Tooltip
                   contentStyle={{
@@ -511,7 +521,7 @@ function App() {
                     border: '1px solid #d1d5db',
                     borderRadius: '4px'
                   }}
-                  formatter={(value) => [`${value}°`, 'Direction']}
+                  formatter={(value) => [`${value}° (${getCardinalDirection(value)})`, 'Direction']}
                 />
                 <Line
                   type="monotone"
@@ -638,6 +648,8 @@ function WindMetric({ data }) {
                     current.wind_gust >= seuils.attention ? 'text-orange-500' :
                     'text-blue-600'
 
+  const cardinalDirection = getCardinalDirection(current.wind_dir)
+
   return (
     <div className="bg-white border border-gray-300 p-4 rounded-lg shadow-sm">
       <div className="text-gray-600 text-sm font-medium mb-2">Vent</div>
@@ -650,7 +662,7 @@ function WindMetric({ data }) {
         </div>
         <div className="flex justify-between text-sm">
           <span className="text-gray-600">Direction:</span>
-          <span className="font-bold text-gray-800">{current.wind_dir}°</span>
+          <span className="font-bold text-gray-800">{current.wind_dir}° ({cardinalDirection})</span>
         </div>
       </div>
     </div>
@@ -865,7 +877,7 @@ function StationsTable({ stations }) {
                   {station.wind_speed != null ? station.wind_speed.toFixed(1) : '--'}
                 </td>
                 <td className="py-2 px-3 text-right font-semibold text-green-600">
-                  {station.wind_dir != null ? station.wind_dir : '--'}
+                  {station.wind_dir != null ? `${station.wind_dir}° (${getCardinalDirection(station.wind_dir)})` : '--'}
                 </td>
                 <td className="py-2 px-3 text-right text-xs text-gray-500">
                   {station.observation_time ? new Date(station.observation_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--'}
