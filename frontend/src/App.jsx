@@ -189,10 +189,36 @@ function App() {
       fetchWindAverage(windPeriod)
     }, 600000)
 
+    // Refresh all data when tab becomes visible again
+    let lastVisibilityTime = Date.now()
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        const timeSinceLastVisible = Date.now() - lastVisibilityTime
+        // If tab was hidden for more than 5 minutes, refresh everything
+        if (timeSinceLastVisible > 300000) {
+          fetchCurrent()
+          fetchStations()
+          fetchTempHistory(tempPeriod)
+          fetchPressureHistory(pressurePeriod)
+          fetchWindHistory(windPeriod)
+          fetchRainHistory(rainPeriod)
+          fetchTempAverage(tempPeriod)
+          fetchPressureAverage(pressurePeriod)
+          fetchWindAverage(windPeriod)
+          fetchForecast()
+        }
+      } else {
+        lastVisibilityTime = Date.now()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
     return () => {
       clearInterval(currentInterval)
       clearInterval(stationsInterval)
       clearInterval(historyInterval)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [])
 

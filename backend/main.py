@@ -80,8 +80,8 @@ async def get_current() -> Dict[str, Any]:
     # Récupérer historique du jour pour tendance pression
     history = await fetch_history_range(STATION_ID, 1)
 
-    # Utiliser pressureMax ou pressureMin selon disponibilité
-    current_pressure = metric.get("pressureMax", metric.get("pressureMin", 1013))
+    # L'endpoint /current retourne 'pressure' directement
+    current_pressure = metric.get("pressure", 1013)
     pressure_trend = calculate_pressure_trend(current_pressure, history)
 
     # Récupérer données quotidiennes pour stats
