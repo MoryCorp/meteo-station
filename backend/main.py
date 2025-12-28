@@ -91,16 +91,16 @@ async def get_current() -> Dict[str, Any]:
         "station_id": STATION_ID,
         "observation_time": obs.get("obsTimeLocal", ""),
         "current": {
-            # Les champs de all/1day utilisent Avg/High au lieu des noms simples
-            "wind_speed": metric.get("windspeedAvg", metric.get("windSpeed", 0)),
-            "wind_gust": metric.get("windgustHigh", metric.get("windGust", 0)),
-            "wind_dir": metric.get("winddirAvg", metric.get("winddir", 0)),
-            "temp": metric.get("tempAvg", metric.get("temp", 0)),
+            # L'endpoint /current retourne des valeurs instantanées (pas de Avg/High)
+            "wind_speed": metric.get("windSpeed", 0),
+            "wind_gust": metric.get("windGust", 0),
+            "wind_dir": obs.get("winddir", 0),
+            "temp": metric.get("temp", 0),
             "pressure": current_pressure,
             "pressure_trend": pressure_trend,
             "rain_rate": metric.get("precipRate", 0),
-            "solar_radiation": obs.get("solarRadiationHigh", metric.get("solarRadiation", 0)),
-            "uv": obs.get("uvHigh", metric.get("uv", 0))
+            "solar_radiation": obs.get("solarRadiation", 0),
+            "uv": obs.get("uv", 0)
         },
         "stats_7d": {
             "max_gust": max_gust_7d,
@@ -379,16 +379,16 @@ async def get_neighboring_stations() -> Dict[str, Any]:
     if main_data and "observations" in main_data and len(main_data["observations"]) > 0:
         obs = main_data["observations"][0]
         metric = obs.get("metric", {})
-        current_pressure = metric.get("pressureMax", metric.get("pressureMin", 0))
+        current_pressure = metric.get("pressure", 0)
 
         stations_data.append({
             "id": STATION_ID,
             "name": obs.get("neighborhood", STATION_ID),
             "is_main": True,
-            "temp": metric.get("tempAvg", 0),
+            "temp": metric.get("temp", 0),
             "pressure": current_pressure,
-            "wind_speed": metric.get("windspeedAvg", 0),
-            "wind_dir": metric.get("winddirAvg", 0),
+            "wind_speed": metric.get("windSpeed", 0),
+            "wind_dir": obs.get("winddir", 0),
             "observation_time": obs.get("obsTimeLocal", "")
         })
 
@@ -399,16 +399,16 @@ async def get_neighboring_stations() -> Dict[str, Any]:
             if data and "observations" in data and len(data["observations"]) > 0:
                 obs = data["observations"][0]
                 metric = obs.get("metric", {})
-                current_pressure = metric.get("pressureMax", metric.get("pressureMin", 0))
+                current_pressure = metric.get("pressure", 0)
 
                 stations_data.append({
                     "id": station_id,
                     "name": obs.get("neighborhood", station_id),
                     "is_main": False,
-                    "temp": metric.get("tempAvg", 0),
+                    "temp": metric.get("temp", 0),
                     "pressure": current_pressure,
-                    "wind_speed": metric.get("windspeedAvg", 0),
-                    "wind_dir": metric.get("winddirAvg", 0),
+                    "wind_speed": metric.get("windSpeed", 0),
+                    "wind_dir": obs.get("winddir", 0),
                     "observation_time": obs.get("obsTimeLocal", "")
                 })
         except Exception as e:

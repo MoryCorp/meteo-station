@@ -72,18 +72,55 @@ async def fetch_all_1day(station_id: str, is_neighbor: bool = False) -> Optional
         return None
 
 async def fetch_current(station_id: str, is_neighbor: bool = False) -> Optional[Dict]:
-    """Récupère l'observation la plus récente"""
-    data = await fetch_all_1day(station_id, is_neighbor=is_neighbor)
+    """Récupère l'observation actuelle (instantanée)"""
+    import logging
+    logger = logging.getLogger("uvicorn")
 
-    if not data or "observations" not in data or len(data["observations"]) == 0:
-        return None
+    cache_key = f"current_{station_id}"
+    ttl = CACHE_TTL["current_neighbors"] if is_neighbor else CACHE_TTL["current"]
+    cached = cache.get(cache_key, ttl)
+    if cached:
+        logger.info(f"[CACHE HIT] current_{station_id} - TTL: {ttl}s")
+        return cached
 
-    # Retourner la dernière observation dans le même format que l'ancien endpoint
-    latest_obs = data["observations"][-1]
-
-    return {
-        "observations": [latest_obs]
+    logger.info(f"[CACHE MISS] current_{station_id} - Fetching fresh data from API")
+    url = f"{BASE_URL}/v2/pws/observations/current"
+    params = {
+        "stationId": station_id,
+        "format": "json",
+        "units": "m",
+        "numericPrecision": "decimal",
+        "apiKey": API_KEY
     }
+
+    try:
+        # Add cache-busting headers to force fresh data
+        headers = {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+            "Connection": "close"  # Force new connection, prevent connection reuse
+        }
+
+        # Use limits to disable connection pooling and force fresh connections
+        limits = httpx.Limits(max_keepalive_connections=0, max_connections=10)
+        async with httpx.AsyncClient(timeout=10.0, limits=limits) as client:
+            response = await client.get(url, params=params, headers=headers)
+            logger.info(f"[API RESPONSE] current_{station_id} - Status: {response.status_code}")
+            logger.info(f"[API REQUEST] Full URL: {response.url}")
+            response.raise_for_status()
+            data = response.json()
+
+            # Log observation time
+            if "observations" in data and len(data["observations"]) > 0:
+                obs_time = data["observations"][0].get("obsTimeLocal", "N/A")
+                logger.info(f"[API DATA] current_{station_id} - Observation time: {obs_time}")
+
+            cache.set(cache_key, data)
+            return data
+    except Exception as e:
+        logger.error(f"[API ERROR] current_{station_id} - {type(e).__name__}: {e}")
+        return None
 
 async def fetch_daily_summary(station_id: str) -> Optional[Dict]:
     """Récupère le résumé quotidien des 7 derniers jours"""
