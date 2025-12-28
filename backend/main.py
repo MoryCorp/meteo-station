@@ -252,7 +252,7 @@ async def get_wind_history(period: str = "daily") -> Dict[str, Any]:
                 "time": obs.get("obsTimeLocal", ""),
                 "wind_speed": metric.get("windspeedAvg", 0),
                 "wind_gust": metric.get("windgustHigh", 0),
-                "wind_dir": metric.get("winddirAvg", 0)
+                "wind_dir": obs.get("winddirAvg", 0)  # winddirAvg est dans obs, pas metric
             })
     else:
         # Agréger par jour
@@ -277,7 +277,7 @@ async def get_wind_history(period: str = "daily") -> Dict[str, Any]:
                 if gust:
                     daily_data[date]["gusts"].append(gust)
 
-                wind_dir = metric.get("winddirAvg", 0)
+                wind_dir = obs.get("winddirAvg", 0)  # winddirAvg est dans obs, pas metric
                 if wind_dir:
                     daily_data[date]["dirs"].append(wind_dir)
             except Exception:
