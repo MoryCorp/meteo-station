@@ -23,12 +23,17 @@ cache = WeatherCache()
 
 async def fetch_all_1day(station_id: str, is_neighbor: bool = False) -> Optional[Dict]:
     """Récupère toutes les observations sur 24h (granularité 5 minutes)"""
+    import logging
+    logger = logging.getLogger("uvicorn")
+
     cache_key = f"all_1day_{station_id}"
     ttl = CACHE_TTL["current_neighbors"] if is_neighbor else CACHE_TTL["current"]
     cached = cache.get(cache_key, ttl)
     if cached:
+        logger.info(f"[CACHE HIT] {station_id} - TTL: {ttl}s")
         return cached
 
+    logger.info(f"[CACHE MISS] {station_id} - Fetching fresh data from API")
     url = f"{BASE_URL}/v2/pws/observations/all/1day"
     params = {
         "stationId": station_id,
@@ -40,12 +45,19 @@ async def fetch_all_1day(station_id: str, is_neighbor: bool = False) -> Optional
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(url, params=params)
+            logger.info(f"[API RESPONSE] {station_id} - Status: {response.status_code}")
             response.raise_for_status()
             data = response.json()
+
+            # Log dernière observation
+            if "observations" in data and len(data["observations"]) > 0:
+                last_obs_time = data["observations"][-1].get("obsTimeLocal", "N/A")
+                logger.info(f"[API DATA] {station_id} - Last observation: {last_obs_time}")
+
             cache.set(cache_key, data)
             return data
     except Exception as e:
-        print(f"Error fetching all/1day for {station_id}: {e}")
+        logger.error(f"[API ERROR] {station_id} - {type(e).__name__}: {e}")
         return None
 
 async def fetch_current(station_id: str, is_neighbor: bool = False) -> Optional[Dict]:
