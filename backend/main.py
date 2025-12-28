@@ -544,6 +544,13 @@ async def get_average_history(metric_name: str, period: str = "daily") -> Dict[s
 async def health_check():
     return {"status": "ok"}
 
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """Vide le cache manuellement (utile pour debug)"""
+    from api import cache
+    cache._cache.clear()
+    return {"status": "cache cleared", "message": "All cached data has been removed"}
+
 # Serve static files (production)
 STATIC_DIR = Path(__file__).parent / "static"
 if STATIC_DIR.exists():
