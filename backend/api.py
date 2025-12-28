@@ -43,9 +43,17 @@ async def fetch_all_1day(station_id: str, is_neighbor: bool = False) -> Optional
     }
 
     try:
+        # Add cache-busting headers to force fresh data
+        headers = {
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
+        }
+
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url, params=params)
+            response = await client.get(url, params=params, headers=headers)
             logger.info(f"[API RESPONSE] {station_id} - Status: {response.status_code}")
+            logger.info(f"[API REQUEST] Full URL: {response.url}")
             response.raise_for_status()
             data = response.json()
 
