@@ -122,9 +122,9 @@ async def get_temperature_history(period: str = "daily") -> Dict[str, Any]:
 
     # Agréger les données selon la période
     if period == "daily":
-        # Données horaires pour 24h
+        # Données toutes les 5 minutes pour 24h (max 288 observations)
         data_points = []
-        for obs in observations[-24:]:
+        for obs in observations[-288:]:
             metric = obs.get("metric", {})
             data_points.append({
                 "time": obs.get("obsTimeLocal", ""),
@@ -184,9 +184,9 @@ async def get_pressure_history(period: str = "daily") -> Dict[str, Any]:
     observations = await fetch_history_range(STATION_ID, days)
 
     if period == "daily":
-        # Données horaires
+        # Données toutes les 5 minutes pour 24h (max 288 observations)
         data_points = []
-        for obs in observations[-24:]:
+        for obs in observations[-288:]:
             metric = obs.get("metric", {})
             data_points.append({
                 "time": obs.get("obsTimeLocal", ""),
@@ -231,9 +231,9 @@ async def get_wind_history(period: str = "daily") -> Dict[str, Any]:
     observations = await fetch_history_range(STATION_ID, days)
 
     if period == "daily":
-        # Données horaires
+        # Données toutes les 5 minutes pour 24h (max 288 observations)
         data_points = []
-        for obs in observations[-24:]:
+        for obs in observations[-288:]:
             metric = obs.get("metric", {})
             data_points.append({
                 "time": obs.get("obsTimeLocal", ""),
@@ -294,9 +294,9 @@ async def get_rain_history(period: str = "daily") -> Dict[str, Any]:
     observations = await fetch_history_range(STATION_ID, days)
 
     if period == "daily":
-        # Données horaires
+        # Données toutes les 5 minutes pour 24h (max 288 observations)
         data_points = []
-        for obs in observations[-24:]:
+        for obs in observations[-288:]:
             metric = obs.get("metric", {})
             data_points.append({
                 "time": obs.get("obsTimeLocal", ""),
