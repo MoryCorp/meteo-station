@@ -17,7 +17,7 @@ COORDS_GAREOULT = {"lat": 43.3279, "lon": 6.0456}
 CACHE_TTL = {
     "current": 300,           # 5 minutes pour station principale
     "current_neighbors": 900, # 15 minutes pour stations voisines
-    "history": 900,           # 15 minutes pour historique
+    "history": 600,           # 10 minutes pour historique (aligné sur frontend refresh)
     "forecast": 3600          # 1 heure pour prévisions
 }
 
