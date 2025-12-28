@@ -47,10 +47,13 @@ async def fetch_all_1day(station_id: str, is_neighbor: bool = False) -> Optional
         headers = {
             "Cache-Control": "no-cache, no-store, must-revalidate",
             "Pragma": "no-cache",
-            "Expires": "0"
+            "Expires": "0",
+            "Connection": "close"  # Force new connection, prevent connection reuse
         }
 
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        # Use limits to disable connection pooling and force fresh connections
+        limits = httpx.Limits(max_keepalive_connections=0, max_connections=10)
+        async with httpx.AsyncClient(timeout=10.0, limits=limits) as client:
             response = await client.get(url, params=params, headers=headers)
             logger.info(f"[API RESPONSE] {station_id} - Status: {response.status_code}")
             logger.info(f"[API REQUEST] Full URL: {response.url}")
