@@ -9,8 +9,12 @@ from fastapi.responses import FileResponse
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 
-from config import STATION_ID, NEIGHBORING_STATIONS, COORDS_GAREOULT, SEUILS
-from api import fetch_current, fetch_history_range, fetch_daily_summary, fetch_forecast, fetch_all_1day
+from config import STATION_ID, COORDS_GAREOULT, SEUILS
+from api import (
+    fetch_current, fetch_history_range, fetch_daily_summary, fetch_forecast,
+    fetch_all_1day, fetch_history_daily_range, fetch_history_hourly_date,
+    fetch_yearly_aggregates
+)
 
 app = FastAPI(title="Station météo Garéoult")
 
@@ -65,6 +69,84 @@ def calculate_pressure_trend(current_pressure: float, history_data: List[Dict]) 
         return {"trend": trend, "change": round(change, 1)}
     except (IndexError, KeyError):
         return {"trend": "stable", "change": 0}
+
+
+def calculate_comparison_periods(period: str) -> Dict[str, Any]:
+    """Calcule les dates de début/fin pour les périodes current et previous.
+
+    Retourne un dictionnaire avec:
+    - current: (start_date, end_date) au format YYYYMMDD
+    - previous: (start_date, end_date) au format YYYYMMDD
+    - current_label: label pour la légende
+    - previous_label: label pour la légende
+    """
+    today = datetime.now().date()
+
+    if period == "daily":
+        # Aujourd'hui vs Hier
+        current_start = today
+        current_end = today
+        previous_start = today - timedelta(days=1)
+        previous_end = today - timedelta(days=1)
+        current_label = "Aujourd'hui"
+        previous_label = "Hier"
+
+    elif period == "weekly":
+        # 7 derniers jours vs 7 jours précédents
+        current_start = today - timedelta(days=6)
+        current_end = today
+        previous_start = today - timedelta(days=13)
+        previous_end = today - timedelta(days=7)
+        current_label = "Cette semaine"
+        previous_label = "Semaine dernière"
+
+    elif period == "monthly":
+        # 30 derniers jours vs 30 jours précédents
+        current_start = today - timedelta(days=29)
+        current_end = today
+        previous_start = today - timedelta(days=59)
+        previous_end = today - timedelta(days=30)
+        current_label = "Ce mois"
+        previous_label = "Mois dernier"
+
+    elif period == "yearly":
+        # Année en cours vs année précédente (agrégats mensuels)
+        current_year = today.year
+        previous_year = current_year - 1
+        return {
+            "type": "yearly",
+            "current_year": current_year,
+            "previous_year": previous_year,
+            "current_label": str(current_year),
+            "previous_label": str(previous_year)
+        }
+
+    else:
+        raise ValueError(f"Unknown period: {period}")
+
+    return {
+        "type": "range",
+        "current": (current_start.strftime("%Y%m%d"), current_end.strftime("%Y%m%d")),
+        "previous": (previous_start.strftime("%Y%m%d"), previous_end.strftime("%Y%m%d")),
+        "current_label": current_label,
+        "previous_label": previous_label
+    }
+
+
+def normalize_comparison_data(current_data: List[Dict], previous_data: List[Dict],
+                               value_key: str) -> tuple[List[Dict], List[Dict]]:
+    """Normalise les données pour la comparaison en ajoutant un index."""
+    # Ajouter un index pour aligner les courbes
+    normalized_current = []
+    for i, item in enumerate(current_data):
+        normalized_current.append({**item, "index": i})
+
+    normalized_previous = []
+    for i, item in enumerate(previous_data):
+        normalized_previous.append({**item, "index": i})
+
+    return normalized_current, normalized_previous
+
 
 @app.get("/api/current")
 async def get_current() -> Dict[str, Any]:
@@ -122,229 +204,528 @@ async def get_current() -> Dict[str, Any]:
         "seuils": SEUILS
     }
 
-@app.get("/api/history/temperature")
-async def get_temperature_history(period: str = "daily") -> Dict[str, Any]:
-    """Récupère l'historique des températures
+def format_time_label(time_str: str, period: str) -> str:
+    """Formate un timestamp en label lisible selon la période."""
+    try:
+        if "T" in time_str:
+            # Format ISO avec heure
+            dt = datetime.fromisoformat(time_str.replace("Z", "+00:00"))
+            if period == "daily":
+                return dt.strftime("%H:%M")
+            return dt.strftime("%d/%m")
+        else:
+            # Format date uniquement
+            dt = datetime.strptime(time_str, "%Y-%m-%d")
+            return dt.strftime("%d/%m")
+    except Exception:
+        return time_str
 
-    Périodes disponibles: daily (24h), weekly (7j), monthly (30j)
-    """
-    days_map = {"daily": 1, "weekly": 7, "monthly": 30}
-    days = days_map.get(period, 1)
 
-    observations = await fetch_history_range(STATION_ID, days)
-
-    # Agréger les données selon la période
+def process_temperature_observations(observations: List[Dict], period: str) -> List[Dict]:
+    """Traite les observations de température selon la période."""
     if period == "daily":
         # Données toutes les 5 minutes pour 24h (max 288 observations)
         data_points = []
         for obs in observations[-288:]:
             metric = obs.get("metric", {})
+            time_str = obs.get("obsTimeLocal", "")
             data_points.append({
-                "time": obs.get("obsTimeLocal", ""),
+                "time": time_str,
+                "label": format_time_label(time_str, period),
                 "temp": metric.get("tempAvg", 0),
                 "temp_high": metric.get("tempHigh", 0),
                 "temp_low": metric.get("tempLow", 0)
             })
+        return data_points
+
+    # Agréger par jour pour weekly/monthly
+    daily_data = {}
+    for obs in observations:
+        obs_time = obs.get("obsTimeLocal", "")
+        if not obs_time:
+            continue
+
+        try:
+            date = obs_time.split("T")[0]
+            if date not in daily_data:
+                daily_data[date] = {"temps": [], "high": [], "low": []}
+
+            metric = obs.get("metric", {})
+            temp = metric.get("tempAvg", 0)
+            if temp:
+                daily_data[date]["temps"].append(temp)
+
+            temp_high = metric.get("tempHigh", 0)
+            if temp_high:
+                daily_data[date]["high"].append(temp_high)
+
+            temp_low = metric.get("tempLow", 0)
+            if temp_low:
+                daily_data[date]["low"].append(temp_low)
+        except Exception:
+            continue
+
+    data_points = []
+    for date in sorted(daily_data.keys()):
+        temps = daily_data[date]["temps"]
+        highs = daily_data[date]["high"]
+        lows = daily_data[date]["low"]
+
+        data_points.append({
+            "time": date,
+            "label": format_time_label(date, period),
+            "temp": round(sum(temps) / len(temps), 1) if temps else 0,
+            "temp_high": max(highs) if highs else 0,
+            "temp_low": min(lows) if lows else 0
+        })
+
+    return data_points
+
+
+@app.get("/api/history/temperature")
+async def get_temperature_history(period: str = "daily", compare: bool = False) -> Dict[str, Any]:
+    """Récupère l'historique des températures
+
+    Périodes disponibles: daily (24h), weekly (7j), monthly (30j), yearly
+    Paramètre compare: si True, retourne les données de la période précédente aussi
+    """
+    if not compare:
+        # Mode normal (sans comparaison)
+        if period == "yearly":
+            # Données annuelles agrégées par mois
+            current_year = datetime.now().year
+            yearly_data = await fetch_yearly_aggregates(STATION_ID, current_year)
+            data_points = [{
+                "time": item["label"],
+                "label": item["label"],
+                "temp": item["temp_avg"],
+                "temp_high": item["temp_high"],
+                "temp_low": item["temp_low"],
+                "index": i
+            } for i, item in enumerate(yearly_data)]
+            return {"period": period, "data": data_points}
+
+        days_map = {"daily": 1, "weekly": 7, "monthly": 30}
+        days = days_map.get(period, 1)
+        observations = await fetch_history_range(STATION_ID, days)
+        data_points = process_temperature_observations(observations, period)
+        return {"period": period, "data": data_points}
+
+    # Mode comparaison
+    periods = calculate_comparison_periods(period)
+
+    if periods["type"] == "yearly":
+        # Comparaison annuelle
+        current_data = await fetch_yearly_aggregates(STATION_ID, periods["current_year"])
+        previous_data = await fetch_yearly_aggregates(STATION_ID, periods["previous_year"])
+
+        current_points = [{
+            "time": item["label"],
+            "label": item["label"],
+            "temp": item["temp_avg"],
+            "temp_high": item["temp_high"],
+            "temp_low": item["temp_low"],
+            "index": i
+        } for i, item in enumerate(current_data)]
+
+        previous_points = [{
+            "time": item["label"],
+            "label": item["label"],
+            "temp": item["temp_avg"],
+            "temp_high": item["temp_high"],
+            "temp_low": item["temp_low"],
+            "index": i
+        } for i, item in enumerate(previous_data)]
+
     else:
-        # Agréger par jour
-        daily_data = {}
-        for obs in observations:
-            obs_time = obs.get("obsTimeLocal", "")
-            if not obs_time:
-                continue
+        # Comparaison daily/weekly/monthly
+        if period == "daily":
+            # Aujourd'hui: données 5 min, Hier: données horaires
+            current_obs = await fetch_history_range(STATION_ID, 1)
+            yesterday = (datetime.now().date() - timedelta(days=1)).strftime("%Y%m%d")
+            previous_obs = await fetch_history_hourly_date(STATION_ID, yesterday)
+        else:
+            # Weekly/Monthly: utiliser les plages de dates
+            current_obs = await fetch_history_daily_range(
+                STATION_ID, periods["current"][0], periods["current"][1]
+            )
+            previous_obs = await fetch_history_daily_range(
+                STATION_ID, periods["previous"][0], periods["previous"][1]
+            )
 
-            try:
-                date = obs_time.split("T")[0]  # Extraire la date
-                if date not in daily_data:
-                    daily_data[date] = {"temps": [], "high": [], "low": []}
+        current_points = process_temperature_observations(current_obs, period)
+        previous_points = process_temperature_observations(previous_obs, period)
 
-                metric = obs.get("metric", {})
-                temp = metric.get("tempAvg", 0)
-                if temp:
-                    daily_data[date]["temps"].append(temp)
+        # Ajouter les index
+        for i, item in enumerate(current_points):
+            item["index"] = i
+        for i, item in enumerate(previous_points):
+            item["index"] = i
 
-                temp_high = metric.get("tempHigh", 0)
-                if temp_high:
-                    daily_data[date]["high"].append(temp_high)
+    return {
+        "period": period,
+        "compare": True,
+        "current": {
+            "label": periods["current_label"],
+            "data": current_points
+        },
+        "previous": {
+            "label": periods["previous_label"],
+            "data": previous_points
+        }
+    }
 
-                temp_low = metric.get("tempLow", 0)
-                if temp_low:
-                    daily_data[date]["low"].append(temp_low)
-            except Exception:
-                continue
-
-        data_points = []
-        for date in sorted(daily_data.keys()):
-            temps = daily_data[date]["temps"]
-            highs = daily_data[date]["high"]
-            lows = daily_data[date]["low"]
-
-            data_points.append({
-                "time": date,
-                "temp": round(sum(temps) / len(temps), 1) if temps else 0,
-                "temp_high": max(highs) if highs else 0,
-                "temp_low": min(lows) if lows else 0
-            })
-
-    return {"period": period, "data": data_points}
-
-@app.get("/api/history/pressure")
-async def get_pressure_history(period: str = "daily") -> Dict[str, Any]:
-    """Récupère l'historique de la pression atmosphérique"""
-    days_map = {"daily": 1, "weekly": 7, "monthly": 30}
-    days = days_map.get(period, 1)
-
-    observations = await fetch_history_range(STATION_ID, days)
-
+def process_pressure_observations(observations: List[Dict], period: str) -> List[Dict]:
+    """Traite les observations de pression selon la période."""
     if period == "daily":
-        # Données toutes les 5 minutes pour 24h (max 288 observations)
         data_points = []
         for obs in observations[-288:]:
             metric = obs.get("metric", {})
+            time_str = obs.get("obsTimeLocal", "")
             data_points.append({
-                "time": obs.get("obsTimeLocal", ""),
+                "time": time_str,
+                "label": format_time_label(time_str, period),
                 "pressure": metric.get("pressureMax", 0) or metric.get("pressure", 0)
             })
+        return data_points
+
+    # Agréger par jour
+    daily_data = {}
+    for obs in observations:
+        obs_time = obs.get("obsTimeLocal", "")
+        if not obs_time:
+            continue
+
+        try:
+            date = obs_time.split("T")[0]
+            if date not in daily_data:
+                daily_data[date] = []
+
+            metric = obs.get("metric", {})
+            pressure = metric.get("pressureMax", 0) or metric.get("pressure", 0)
+            if pressure:
+                daily_data[date].append(pressure)
+        except Exception:
+            continue
+
+    data_points = []
+    for date in sorted(daily_data.keys()):
+        pressures = daily_data[date]
+        data_points.append({
+            "time": date,
+            "label": format_time_label(date, period),
+            "pressure": round(sum(pressures) / len(pressures), 1) if pressures else 0
+        })
+    return data_points
+
+
+@app.get("/api/history/pressure")
+async def get_pressure_history(period: str = "daily", compare: bool = False) -> Dict[str, Any]:
+    """Récupère l'historique de la pression atmosphérique
+
+    Périodes disponibles: daily (24h), weekly (7j), monthly (30j), yearly
+    Paramètre compare: si True, retourne les données de la période précédente aussi
+    """
+    if not compare:
+        if period == "yearly":
+            current_year = datetime.now().year
+            yearly_data = await fetch_yearly_aggregates(STATION_ID, current_year)
+            data_points = [{
+                "time": item["label"],
+                "label": item["label"],
+                "pressure": item["pressure_avg"],
+                "index": i
+            } for i, item in enumerate(yearly_data)]
+            return {"period": period, "data": data_points}
+
+        days_map = {"daily": 1, "weekly": 7, "monthly": 30}
+        days = days_map.get(period, 1)
+        observations = await fetch_history_range(STATION_ID, days)
+        data_points = process_pressure_observations(observations, period)
+        return {"period": period, "data": data_points}
+
+    # Mode comparaison
+    periods = calculate_comparison_periods(period)
+
+    if periods["type"] == "yearly":
+        current_data = await fetch_yearly_aggregates(STATION_ID, periods["current_year"])
+        previous_data = await fetch_yearly_aggregates(STATION_ID, periods["previous_year"])
+
+        current_points = [{"time": item["label"], "label": item["label"], "pressure": item["pressure_avg"], "index": i}
+                          for i, item in enumerate(current_data)]
+        previous_points = [{"time": item["label"], "label": item["label"], "pressure": item["pressure_avg"], "index": i}
+                           for i, item in enumerate(previous_data)]
     else:
-        # Agréger par jour
-        daily_data = {}
-        for obs in observations:
-            obs_time = obs.get("obsTimeLocal", "")
-            if not obs_time:
-                continue
+        if period == "daily":
+            current_obs = await fetch_history_range(STATION_ID, 1)
+            yesterday = (datetime.now().date() - timedelta(days=1)).strftime("%Y%m%d")
+            previous_obs = await fetch_history_hourly_date(STATION_ID, yesterday)
+        else:
+            current_obs = await fetch_history_daily_range(
+                STATION_ID, periods["current"][0], periods["current"][1]
+            )
+            previous_obs = await fetch_history_daily_range(
+                STATION_ID, periods["previous"][0], periods["previous"][1]
+            )
 
-            try:
-                date = obs_time.split("T")[0]
-                if date not in daily_data:
-                    daily_data[date] = []
+        current_points = process_pressure_observations(current_obs, period)
+        previous_points = process_pressure_observations(previous_obs, period)
 
-                metric = obs.get("metric", {})
-                pressure = metric.get("pressureMax", 0) or metric.get("pressure", 0)
-                if pressure:
-                    daily_data[date].append(pressure)
-            except Exception:
-                continue
+        for i, item in enumerate(current_points):
+            item["index"] = i
+        for i, item in enumerate(previous_points):
+            item["index"] = i
 
-        data_points = []
-        for date in sorted(daily_data.keys()):
-            pressures = daily_data[date]
-            data_points.append({
-                "time": date,
-                "pressure": round(sum(pressures) / len(pressures), 1) if pressures else 0
-            })
+    return {
+        "period": period,
+        "compare": True,
+        "current": {"label": periods["current_label"], "data": current_points},
+        "previous": {"label": periods["previous_label"], "data": previous_points}
+    }
 
-    return {"period": period, "data": data_points}
-
-@app.get("/api/history/wind")
-async def get_wind_history(period: str = "daily") -> Dict[str, Any]:
-    """Récupère l'historique du vent (vitesse et direction)"""
-    days_map = {"daily": 1, "weekly": 7, "monthly": 30}
-    days = days_map.get(period, 1)
-
-    observations = await fetch_history_range(STATION_ID, days)
-
+def process_wind_observations(observations: List[Dict], period: str) -> List[Dict]:
+    """Traite les observations de vent selon la période."""
     if period == "daily":
-        # Données toutes les 5 minutes pour 24h (max 288 observations)
         data_points = []
         for obs in observations[-288:]:
             metric = obs.get("metric", {})
+            time_str = obs.get("obsTimeLocal", "")
             data_points.append({
-                "time": obs.get("obsTimeLocal", ""),
+                "time": time_str,
+                "label": format_time_label(time_str, period),
                 "wind_speed": metric.get("windspeedAvg", 0),
                 "wind_gust": metric.get("windgustHigh", 0),
-                "wind_dir": obs.get("winddirAvg", 0)  # winddirAvg est dans obs, pas metric
+                "wind_dir": obs.get("winddirAvg", 0)
             })
+        return data_points
+
+    # Agréger par jour
+    daily_data = {}
+    for obs in observations:
+        obs_time = obs.get("obsTimeLocal", "")
+        if not obs_time:
+            continue
+
+        try:
+            date = obs_time.split("T")[0]
+            if date not in daily_data:
+                daily_data[date] = {"speeds": [], "gusts": [], "dirs": []}
+
+            metric = obs.get("metric", {})
+
+            speed = metric.get("windspeedAvg", 0)
+            if speed:
+                daily_data[date]["speeds"].append(speed)
+
+            gust = metric.get("windgustHigh", 0)
+            if gust:
+                daily_data[date]["gusts"].append(gust)
+
+            wind_dir = obs.get("winddirAvg", 0)
+            if wind_dir:
+                daily_data[date]["dirs"].append(wind_dir)
+        except Exception:
+            continue
+
+    data_points = []
+    for date in sorted(daily_data.keys()):
+        speeds = daily_data[date]["speeds"]
+        gusts = daily_data[date]["gusts"]
+        dirs = daily_data[date]["dirs"]
+
+        data_points.append({
+            "time": date,
+            "label": format_time_label(date, period),
+            "wind_speed": round(sum(speeds) / len(speeds), 1) if speeds else 0,
+            "wind_gust": max(gusts) if gusts else 0,
+            "wind_dir": round(sum(dirs) / len(dirs), 0) if dirs else 0
+        })
+    return data_points
+
+
+@app.get("/api/history/wind")
+async def get_wind_history(period: str = "daily", compare: bool = False) -> Dict[str, Any]:
+    """Récupère l'historique du vent (vitesse et direction)
+
+    Périodes disponibles: daily (24h), weekly (7j), monthly (30j), yearly
+    Paramètre compare: si True, retourne les données de la période précédente aussi
+    """
+    if not compare:
+        if period == "yearly":
+            current_year = datetime.now().year
+            yearly_data = await fetch_yearly_aggregates(STATION_ID, current_year)
+            data_points = [{
+                "time": item["label"],
+                "label": item["label"],
+                "wind_speed": item["wind_avg"],
+                "wind_gust": item["wind_gust_max"],
+                "index": i
+            } for i, item in enumerate(yearly_data)]
+            return {"period": period, "data": data_points}
+
+        days_map = {"daily": 1, "weekly": 7, "monthly": 30}
+        days = days_map.get(period, 1)
+        observations = await fetch_history_range(STATION_ID, days)
+        data_points = process_wind_observations(observations, period)
+        return {"period": period, "data": data_points}
+
+    # Mode comparaison
+    periods = calculate_comparison_periods(period)
+
+    if periods["type"] == "yearly":
+        current_data = await fetch_yearly_aggregates(STATION_ID, periods["current_year"])
+        previous_data = await fetch_yearly_aggregates(STATION_ID, periods["previous_year"])
+
+        current_points = [{
+            "time": item["label"],
+            "label": item["label"],
+            "wind_speed": item["wind_avg"],
+            "wind_gust": item["wind_gust_max"],
+            "index": i
+        } for i, item in enumerate(current_data)]
+        previous_points = [{
+            "time": item["label"],
+            "label": item["label"],
+            "wind_speed": item["wind_avg"],
+            "wind_gust": item["wind_gust_max"],
+            "index": i
+        } for i, item in enumerate(previous_data)]
     else:
-        # Agréger par jour
-        daily_data = {}
-        for obs in observations:
-            obs_time = obs.get("obsTimeLocal", "")
-            if not obs_time:
-                continue
+        if period == "daily":
+            current_obs = await fetch_history_range(STATION_ID, 1)
+            yesterday = (datetime.now().date() - timedelta(days=1)).strftime("%Y%m%d")
+            previous_obs = await fetch_history_hourly_date(STATION_ID, yesterday)
+        else:
+            current_obs = await fetch_history_daily_range(
+                STATION_ID, periods["current"][0], periods["current"][1]
+            )
+            previous_obs = await fetch_history_daily_range(
+                STATION_ID, periods["previous"][0], periods["previous"][1]
+            )
 
-            try:
-                date = obs_time.split("T")[0]
-                if date not in daily_data:
-                    daily_data[date] = {"speeds": [], "gusts": [], "dirs": []}
+        current_points = process_wind_observations(current_obs, period)
+        previous_points = process_wind_observations(previous_obs, period)
 
-                metric = obs.get("metric", {})
+        for i, item in enumerate(current_points):
+            item["index"] = i
+        for i, item in enumerate(previous_points):
+            item["index"] = i
 
-                speed = metric.get("windspeedAvg", 0)
-                if speed:
-                    daily_data[date]["speeds"].append(speed)
+    return {
+        "period": period,
+        "compare": True,
+        "current": {"label": periods["current_label"], "data": current_points},
+        "previous": {"label": periods["previous_label"], "data": previous_points}
+    }
 
-                gust = metric.get("windgustHigh", 0)
-                if gust:
-                    daily_data[date]["gusts"].append(gust)
-
-                wind_dir = obs.get("winddirAvg", 0)  # winddirAvg est dans obs, pas metric
-                if wind_dir:
-                    daily_data[date]["dirs"].append(wind_dir)
-            except Exception:
-                continue
-
-        data_points = []
-        for date in sorted(daily_data.keys()):
-            speeds = daily_data[date]["speeds"]
-            gusts = daily_data[date]["gusts"]
-            dirs = daily_data[date]["dirs"]
-
-            data_points.append({
-                "time": date,
-                "wind_speed": round(sum(speeds) / len(speeds), 1) if speeds else 0,
-                "wind_gust": max(gusts) if gusts else 0,
-                "wind_dir": round(sum(dirs) / len(dirs), 0) if dirs else 0
-            })
-
-    return {"period": period, "data": data_points}
-
-@app.get("/api/history/rain")
-async def get_rain_history(period: str = "daily") -> Dict[str, Any]:
-    """Récupère l'historique de la pluviométrie"""
-    days_map = {"daily": 1, "weekly": 7, "monthly": 30}
-    days = days_map.get(period, 1)
-
-    observations = await fetch_history_range(STATION_ID, days)
-
+def process_rain_observations(observations: List[Dict], period: str) -> List[Dict]:
+    """Traite les observations de pluie selon la période."""
     if period == "daily":
-        # Données toutes les 5 minutes pour 24h (max 288 observations)
         data_points = []
         for obs in observations[-288:]:
             metric = obs.get("metric", {})
+            time_str = obs.get("obsTimeLocal", "")
             data_points.append({
-                "time": obs.get("obsTimeLocal", ""),
+                "time": time_str,
+                "label": format_time_label(time_str, period),
                 "rain": metric.get("precipTotal", 0),
                 "rain_rate": metric.get("precipRate", 0)
             })
+        return data_points
+
+    # Agréger par jour
+    daily_data = {}
+    for obs in observations:
+        obs_time = obs.get("obsTimeLocal", "")
+        if not obs_time:
+            continue
+
+        try:
+            date = obs_time.split("T")[0]
+            if date not in daily_data:
+                daily_data[date] = []
+
+            metric = obs.get("metric", {})
+            rain = metric.get("precipTotal", 0)
+            if rain:
+                daily_data[date].append(rain)
+        except Exception:
+            continue
+
+    data_points = []
+    for date in sorted(daily_data.keys()):
+        rains = daily_data[date]
+        data_points.append({
+            "time": date,
+            "label": format_time_label(date, period),
+            "rain": round(sum(rains), 1) if rains else 0
+        })
+    return data_points
+
+
+@app.get("/api/history/rain")
+async def get_rain_history(period: str = "daily", compare: bool = False) -> Dict[str, Any]:
+    """Récupère l'historique de la pluviométrie
+
+    Périodes disponibles: daily (24h), weekly (7j), monthly (30j), yearly
+    Paramètre compare: si True, retourne les données de la période précédente aussi
+    """
+    if not compare:
+        if period == "yearly":
+            current_year = datetime.now().year
+            yearly_data = await fetch_yearly_aggregates(STATION_ID, current_year)
+            data_points = [{
+                "time": item["label"],
+                "label": item["label"],
+                "rain": item["rain_total"],
+                "index": i
+            } for i, item in enumerate(yearly_data)]
+            return {"period": period, "data": data_points}
+
+        days_map = {"daily": 1, "weekly": 7, "monthly": 30}
+        days = days_map.get(period, 1)
+        observations = await fetch_history_range(STATION_ID, days)
+        data_points = process_rain_observations(observations, period)
+        return {"period": period, "data": data_points}
+
+    # Mode comparaison
+    periods = calculate_comparison_periods(period)
+
+    if periods["type"] == "yearly":
+        current_data = await fetch_yearly_aggregates(STATION_ID, periods["current_year"])
+        previous_data = await fetch_yearly_aggregates(STATION_ID, periods["previous_year"])
+
+        current_points = [{"time": item["label"], "label": item["label"], "rain": item["rain_total"], "index": i}
+                          for i, item in enumerate(current_data)]
+        previous_points = [{"time": item["label"], "label": item["label"], "rain": item["rain_total"], "index": i}
+                           for i, item in enumerate(previous_data)]
     else:
-        # Agréger par jour
-        daily_data = {}
-        for obs in observations:
-            obs_time = obs.get("obsTimeLocal", "")
-            if not obs_time:
-                continue
+        if period == "daily":
+            current_obs = await fetch_history_range(STATION_ID, 1)
+            yesterday = (datetime.now().date() - timedelta(days=1)).strftime("%Y%m%d")
+            previous_obs = await fetch_history_hourly_date(STATION_ID, yesterday)
+        else:
+            current_obs = await fetch_history_daily_range(
+                STATION_ID, periods["current"][0], periods["current"][1]
+            )
+            previous_obs = await fetch_history_daily_range(
+                STATION_ID, periods["previous"][0], periods["previous"][1]
+            )
 
-            try:
-                date = obs_time.split("T")[0]
-                if date not in daily_data:
-                    daily_data[date] = []
+        current_points = process_rain_observations(current_obs, period)
+        previous_points = process_rain_observations(previous_obs, period)
 
-                metric = obs.get("metric", {})
-                rain = metric.get("precipTotal", 0)
-                if rain:
-                    daily_data[date].append(rain)
-            except Exception:
-                continue
+        for i, item in enumerate(current_points):
+            item["index"] = i
+        for i, item in enumerate(previous_points):
+            item["index"] = i
 
-        data_points = []
-        for date in sorted(daily_data.keys()):
-            rains = daily_data[date]
-            data_points.append({
-                "time": date,
-                "rain": round(sum(rains), 1) if rains else 0
-            })
-
-    return {"period": period, "data": data_points}
+    return {
+        "period": period,
+        "compare": True,
+        "current": {"label": periods["current_label"], "data": current_points},
+        "previous": {"label": periods["previous_label"], "data": previous_points}
+    }
 
 @app.get("/api/forecast")
 async def get_forecast() -> Dict[str, Any]:
@@ -381,177 +762,6 @@ async def get_forecast() -> Dict[str, Any]:
             })
 
     return {"forecasts": forecasts}
-
-@app.get("/api/stations")
-async def get_neighboring_stations() -> Dict[str, Any]:
-    """Récupère les données actuelles de toutes les stations de Garéoult"""
-    stations_data = []
-
-    # Station principale
-    main_data = await fetch_current(STATION_ID)
-    if main_data and "observations" in main_data and len(main_data["observations"]) > 0:
-        obs = main_data["observations"][0]
-        metric = obs.get("metric", {})
-        current_pressure = metric.get("pressure", 0)
-
-        stations_data.append({
-            "id": STATION_ID,
-            "name": obs.get("neighborhood", STATION_ID),
-            "is_main": True,
-            "temp": metric.get("temp", 0),
-            "pressure": current_pressure,
-            "wind_speed": metric.get("windSpeed", 0),
-            "wind_dir": obs.get("winddir", 0),
-            "observation_time": obs.get("obsTimeLocal", "")
-        })
-
-    # Stations voisines
-    for station_id in NEIGHBORING_STATIONS:
-        try:
-            data = await fetch_current(station_id, is_neighbor=True)
-            if data and "observations" in data and len(data["observations"]) > 0:
-                obs = data["observations"][0]
-                metric = obs.get("metric", {})
-                current_pressure = metric.get("pressure", 0)
-
-                stations_data.append({
-                    "id": station_id,
-                    "name": obs.get("neighborhood", station_id),
-                    "is_main": False,
-                    "temp": metric.get("temp", 0),
-                    "pressure": current_pressure,
-                    "wind_speed": metric.get("windSpeed", 0),
-                    "wind_dir": obs.get("winddir", 0),
-                    "observation_time": obs.get("obsTimeLocal", "")
-                })
-        except Exception as e:
-            print(f"Error fetching data for station {station_id}: {e}")
-            continue
-
-    return {"stations": stations_data}
-
-@app.get("/api/history/average/{metric_name}")
-async def get_average_history(metric_name: str, period: str = "daily") -> Dict[str, Any]:
-    """Récupère la moyenne des stations voisines pour une métrique donnée
-
-    Métriques supportées: temperature, pressure, wind
-    """
-    days_map = {"daily": 1, "weekly": 7, "monthly": 30}
-    days = days_map.get(period, 1)
-
-    # Récupérer les données de toutes les stations
-    all_stations_data = {}
-
-    for station_id in NEIGHBORING_STATIONS:
-        try:
-            observations = await fetch_history_range(station_id, days, is_neighbor=True)
-            if observations:
-                all_stations_data[station_id] = observations
-        except Exception as e:
-            print(f"Error fetching history for {station_id}: {e}")
-            continue
-
-    if not all_stations_data:
-        return {"period": period, "data": []}
-
-    # Calculer la moyenne par timestamp
-    averaged_data = []
-
-    if period == "daily":
-        # Données toutes les 5 minutes - utiliser le timestamp comme clé
-        time_buckets = {}
-
-        for station_id, observations in all_stations_data.items():
-            for obs in observations:
-                time_key = obs.get("obsTimeLocal", "")
-                if not time_key:
-                    continue
-
-                if time_key not in time_buckets:
-                    time_buckets[time_key] = {
-                        "time": time_key,
-                        "values": []
-                    }
-
-                metric = obs.get("metric", {})
-
-                if metric_name == "temperature":
-                    value = metric.get("tempAvg", 0)
-                elif metric_name == "pressure":
-                    value = metric.get("pressureMax", metric.get("pressureMin", 0))
-                elif metric_name == "wind":
-                    value = metric.get("windspeedAvg", 0)
-                else:
-                    value = 0
-
-                if value:
-                    time_buckets[time_key]["values"].append(value)
-
-        # Calculer les moyennes
-        for time_key in sorted(time_buckets.keys()):
-            bucket = time_buckets[time_key]
-            if bucket["values"]:
-                avg_value = sum(bucket["values"]) / len(bucket["values"])
-
-                # Utiliser les bons noms de champs selon la métrique
-                data_point = {"time": bucket["time"]}
-                if metric_name == "temperature":
-                    data_point["temp"] = round(avg_value, 1)
-                elif metric_name == "pressure":
-                    data_point["pressure"] = round(avg_value, 1)
-                elif metric_name == "wind":
-                    data_point["wind_speed"] = round(avg_value, 1)
-
-                averaged_data.append(data_point)
-
-    else:
-        # Pour weekly et monthly : agréger par jour
-        daily_buckets = {}
-
-        for station_id, observations in all_stations_data.items():
-            for obs in observations:
-                obs_time = obs.get("obsTimeLocal", "")
-                if not obs_time:
-                    continue
-
-                try:
-                    date = obs_time.split("T")[0]
-                    if date not in daily_buckets:
-                        daily_buckets[date] = []
-
-                    metric = obs.get("metric", {})
-
-                    if metric_name == "temperature":
-                        value = metric.get("tempAvg", 0)
-                    elif metric_name == "pressure":
-                        value = metric.get("pressureMax", metric.get("pressureMin", 0))
-                    elif metric_name == "wind":
-                        value = metric.get("windspeedAvg", 0)
-                    else:
-                        value = 0
-
-                    if value:
-                        daily_buckets[date].append(value)
-                except Exception:
-                    continue
-
-        # Calculer les moyennes journalières
-        for date in sorted(daily_buckets.keys()):
-            values = daily_buckets[date]
-            if values:
-                avg_value = sum(values) / len(values)
-
-                data_point = {"time": date}
-                if metric_name == "temperature":
-                    data_point["temp"] = round(avg_value, 1)
-                elif metric_name == "pressure":
-                    data_point["pressure"] = round(avg_value, 1)
-                elif metric_name == "wind":
-                    data_point["wind_speed"] = round(avg_value, 1)
-
-                averaged_data.append(data_point)
-
-    return {"period": period, "data": averaged_data[-288 if period == "daily" else -30:]}
 
 @app.get("/health")
 async def health_check():

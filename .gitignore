@@ -36,3 +36,6 @@ yarn-error.log*
 
 # Build outputs
 backend/static/
+
+# Documentation API
+api_doc/

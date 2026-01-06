@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { ComposedChart, LineChart, Line, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { ComposedChart, LineChart, Line, Area, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 // Convert wind direction in degrees to cardinal direction
 function getCardinalDirection(degrees) {
@@ -18,15 +18,13 @@ function App() {
   const [windHistory, setWindHistory] = useState(null)
   const [rainHistory, setRainHistory] = useState(null)
 
-  const [stations, setStations] = useState(null)
-  const [tempAverage, setTempAverage] = useState(null)
-  const [pressureAverage, setPressureAverage] = useState(null)
-  const [windAverage, setWindAverage] = useState(null)
-
   const [tempPeriod, setTempPeriod] = useState('daily')
   const [pressurePeriod, setPressurePeriod] = useState('daily')
   const [windPeriod, setWindPeriod] = useState('daily')
   const [rainPeriod, setRainPeriod] = useState('daily')
+
+  // Mode comparaison
+  const [compareMode, setCompareMode] = useState(false)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -57,9 +55,10 @@ function App() {
   }
 
   // Fetch temperature history
-  const fetchTempHistory = async (period) => {
+  const fetchTempHistory = async (period, compare = false) => {
     try {
-      const res = await fetch(`/api/history/temperature?period=${period}`)
+      const url = `/api/history/temperature?period=${period}${compare ? '&compare=true' : ''}`
+      const res = await fetch(url)
       if (res.ok) {
         const data = await res.json()
         setTempHistory(data)
@@ -70,9 +69,10 @@ function App() {
   }
 
   // Fetch pressure history
-  const fetchPressureHistory = async (period) => {
+  const fetchPressureHistory = async (period, compare = false) => {
     try {
-      const res = await fetch(`/api/history/pressure?period=${period}`)
+      const url = `/api/history/pressure?period=${period}${compare ? '&compare=true' : ''}`
+      const res = await fetch(url)
       if (res.ok) {
         const data = await res.json()
         setPressureHistory(data)
@@ -83,9 +83,10 @@ function App() {
   }
 
   // Fetch wind history
-  const fetchWindHistory = async (period) => {
+  const fetchWindHistory = async (period, compare = false) => {
     try {
-      const res = await fetch(`/api/history/wind?period=${period}`)
+      const url = `/api/history/wind?period=${period}${compare ? '&compare=true' : ''}`
+      const res = await fetch(url)
       if (res.ok) {
         const data = await res.json()
         setWindHistory(data)
@@ -96,9 +97,10 @@ function App() {
   }
 
   // Fetch rain history
-  const fetchRainHistory = async (period) => {
+  const fetchRainHistory = async (period, compare = false) => {
     try {
-      const res = await fetch(`/api/history/rain?period=${period}`)
+      const url = `/api/history/rain?period=${period}${compare ? '&compare=true' : ''}`
+      const res = await fetch(url)
       if (res.ok) {
         const data = await res.json()
         setRainHistory(data)
@@ -108,71 +110,15 @@ function App() {
     }
   }
 
-  // Fetch stations data
-  const fetchStations = async () => {
-    try {
-      const res = await fetch('/api/stations')
-      if (res.ok) {
-        const data = await res.json()
-        setStations(data)
-      }
-    } catch (err) {
-      console.error('Stations fetch error:', err)
-    }
-  }
-
-  // Fetch temperature average
-  const fetchTempAverage = async (period) => {
-    try {
-      const res = await fetch(`/api/history/average/temperature?period=${period}`)
-      if (res.ok) {
-        const data = await res.json()
-        setTempAverage(data)
-      }
-    } catch (err) {
-      console.error('Temperature average fetch error:', err)
-    }
-  }
-
-  // Fetch pressure average
-  const fetchPressureAverage = async (period) => {
-    try {
-      const res = await fetch(`/api/history/average/pressure?period=${period}`)
-      if (res.ok) {
-        const data = await res.json()
-        setPressureAverage(data)
-      }
-    } catch (err) {
-      console.error('Pressure average fetch error:', err)
-    }
-  }
-
-  // Fetch wind average
-  const fetchWindAverage = async (period) => {
-    try {
-      const res = await fetch(`/api/history/average/wind?period=${period}`)
-      if (res.ok) {
-        const data = await res.json()
-        setWindAverage(data)
-      }
-    } catch (err) {
-      console.error('Wind average fetch error:', err)
-    }
-  }
-
   // Initial load
   useEffect(() => {
     const loadAll = async () => {
       await fetchCurrent()
       await fetchForecast()
-      await fetchStations()
       await fetchTempHistory('daily')
       await fetchPressureHistory('daily')
       await fetchWindHistory('daily')
       await fetchRainHistory('daily')
-      await fetchTempAverage('daily')
-      await fetchPressureAverage('daily')
-      await fetchWindAverage('daily')
       setLoading(false)
     }
     loadAll()
@@ -182,20 +128,12 @@ function App() {
       fetchCurrent()
     }, 120000)
 
-    // Refresh stations every 15 minutes
-    const stationsInterval = setInterval(() => {
-      fetchStations()
-    }, 900000)
-
     // Refresh history every 10 minutes
     const historyInterval = setInterval(() => {
       fetchTempHistory(tempPeriod)
       fetchPressureHistory(pressurePeriod)
       fetchWindHistory(windPeriod)
       fetchRainHistory(rainPeriod)
-      fetchTempAverage(tempPeriod)
-      fetchPressureAverage(pressurePeriod)
-      fetchWindAverage(windPeriod)
     }, 600000)
 
     // Refresh all data when tab becomes visible again
@@ -206,14 +144,10 @@ function App() {
         // If tab was hidden for more than 5 minutes, refresh everything
         if (timeSinceLastVisible > 300000) {
           fetchCurrent()
-          fetchStations()
           fetchTempHistory(tempPeriod)
           fetchPressureHistory(pressurePeriod)
           fetchWindHistory(windPeriod)
           fetchRainHistory(rainPeriod)
-          fetchTempAverage(tempPeriod)
-          fetchPressureAverage(pressurePeriod)
-          fetchWindAverage(windPeriod)
           fetchForecast()
         }
       } else {
@@ -225,31 +159,27 @@ function App() {
 
     return () => {
       clearInterval(currentInterval)
-      clearInterval(stationsInterval)
       clearInterval(historyInterval)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [])
 
-  // Refresh history when period changes
+  // Refresh history when period or compare mode changes
   useEffect(() => {
-    fetchTempHistory(tempPeriod)
-    fetchTempAverage(tempPeriod)
-  }, [tempPeriod])
+    fetchTempHistory(tempPeriod, compareMode)
+  }, [tempPeriod, compareMode])
 
   useEffect(() => {
-    fetchPressureHistory(pressurePeriod)
-    fetchPressureAverage(pressurePeriod)
-  }, [pressurePeriod])
+    fetchPressureHistory(pressurePeriod, compareMode)
+  }, [pressurePeriod, compareMode])
 
   useEffect(() => {
-    fetchWindHistory(windPeriod)
-    fetchWindAverage(windPeriod)
-  }, [windPeriod])
+    fetchWindHistory(windPeriod, compareMode)
+  }, [windPeriod, compareMode])
 
   useEffect(() => {
-    fetchRainHistory(rainPeriod)
-  }, [rainPeriod])
+    fetchRainHistory(rainPeriod, compareMode)
+  }, [rainPeriod, compareMode])
 
   if (loading) {
     return (
@@ -282,30 +212,22 @@ function App() {
           <UVMetric data={current} />
         </div>
 
-        {/* Stations Comparison Table */}
-        <StationsTable stations={stations} />
-
         {/* Temperature History */}
         <HistoryChart
           title="Température"
           data={tempHistory}
-          averageData={tempAverage}
           period={tempPeriod}
           setPeriod={setTempPeriod}
-          renderChart={(data, avgData) => (
+          compareMode={compareMode}
+          setCompareMode={setCompareMode}
+          renderChart={(data) => (
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
-                  dataKey="time"
+                  dataKey="label"
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 11 }}
-                  tickFormatter={(value) => {
-                    if (tempPeriod === 'daily') {
-                      return new Date(value).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-                    }
-                    return new Date(value).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
-                  }}
                 />
                 <YAxis
                   stroke="#6b7280"
@@ -341,19 +263,52 @@ function App() {
                   stroke="#0ea5e9"
                   strokeWidth={2}
                   dot={false}
-                  name="IGAROU17"
+                  name="Température"
                 />
-                {avgData && (
-                  <Line
-                    type="monotone"
-                    dataKey="temp_avg"
-                    stroke="#94a3b8"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    name="Moyenne Garéoult"
-                  />
-                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+          renderCompareChart={(compData) => (
+            <ResponsiveContainer width="100%" height={300}>
+              <ComposedChart data={compData.current.data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis
+                  dataKey="label"
+                  stroke="#6b7280"
+                  tick={{ fill: '#6b7280', fontSize: 11 }}
+                />
+                <YAxis
+                  stroke="#6b7280"
+                  tick={{ fill: '#6b7280', fontSize: 12 }}
+                  label={{ value: '°C', angle: -90, position: 'insideLeft', fill: '#6b7280' }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px'
+                  }}
+                />
+                {/* Courbe actuelle - bleue */}
+                <Line
+                  type="monotone"
+                  dataKey="temp"
+                  stroke="#0ea5e9"
+                  strokeWidth={2}
+                  dot={false}
+                  name={compData.current.label}
+                />
+                {/* Courbe précédente - grise pointillée */}
+                <Line
+                  type="monotone"
+                  data={compData.previous.data}
+                  dataKey="temp"
+                  stroke="#9ca3af"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={false}
+                  name={compData.previous.label}
+                />
               </ComposedChart>
             </ResponsiveContainer>
           )}
@@ -363,23 +318,18 @@ function App() {
         <HistoryChart
           title="Pression atmosphérique"
           data={pressureHistory}
-          averageData={pressureAverage}
           period={pressurePeriod}
           setPeriod={setPressurePeriod}
-          renderChart={(data, avgData) => (
+          compareMode={compareMode}
+          setCompareMode={setCompareMode}
+          renderChart={(data) => (
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
-                  dataKey="time"
+                  dataKey="label"
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 11 }}
-                  tickFormatter={(value) => {
-                    if (pressurePeriod === 'daily') {
-                      return new Date(value).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-                    }
-                    return new Date(value).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
-                  }}
                 />
                 <YAxis
                   stroke="#6b7280"
@@ -400,19 +350,53 @@ function App() {
                   stroke="#8b5cf6"
                   strokeWidth={2}
                   dot={false}
-                  name="IGAROU17"
+                  name="Pression"
                 />
-                {avgData && (
-                  <Line
-                    type="monotone"
-                    dataKey="pressure_avg"
-                    stroke="#94a3b8"
-                    strokeWidth={2}
-                    strokeDasharray="5 5"
-                    dot={false}
-                    name="Moyenne Garéoult"
-                  />
-                )}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+          renderCompareChart={(compData) => (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={compData.current.data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis
+                  dataKey="label"
+                  stroke="#6b7280"
+                  tick={{ fill: '#6b7280', fontSize: 11 }}
+                />
+                <YAxis
+                  stroke="#6b7280"
+                  tick={{ fill: '#6b7280', fontSize: 12 }}
+                  label={{ value: 'hPa', angle: -90, position: 'insideLeft', fill: '#6b7280' }}
+                  domain={['dataMin - 5', 'dataMax + 5']}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px'
+                  }}
+                />
+                {/* Courbe actuelle - violette */}
+                <Line
+                  type="monotone"
+                  dataKey="pressure"
+                  stroke="#8b5cf6"
+                  strokeWidth={2}
+                  dot={false}
+                  name={compData.current.label}
+                />
+                {/* Courbe précédente - grise pointillée */}
+                <Line
+                  type="monotone"
+                  data={compData.previous.data}
+                  dataKey="pressure"
+                  stroke="#9ca3af"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={false}
+                  name={compData.previous.label}
+                />
               </LineChart>
             </ResponsiveContainer>
           )}
@@ -422,23 +406,18 @@ function App() {
         <HistoryChart
           title="Vent - Vitesse"
           data={windHistory}
-          averageData={windAverage}
           period={windPeriod}
           setPeriod={setWindPeriod}
-          renderChart={(data, avgData) => (
+          compareMode={compareMode}
+          setCompareMode={setCompareMode}
+          renderChart={(data) => (
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
-                  dataKey="time"
+                  dataKey="label"
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 11 }}
-                  tickFormatter={(value) => {
-                    if (windPeriod === 'daily') {
-                      return new Date(value).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-                    }
-                    return new Date(value).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
-                  }}
                 />
                 <YAxis
                   stroke="#6b7280"
@@ -458,7 +437,7 @@ function App() {
                   stroke="#0ea5e9"
                   strokeWidth={2}
                   dot={false}
-                  name="IGAROU17"
+                  name="Vitesse"
                 />
                 <Line
                   type="monotone"
@@ -469,17 +448,50 @@ function App() {
                   strokeDasharray="5 5"
                   name="Rafales"
                 />
-                {avgData && (
-                  <Line
-                    type="monotone"
-                    dataKey="wind_avg"
-                    stroke="#94a3b8"
-                    strokeWidth={2}
-                    strokeDasharray="3 3"
-                    dot={false}
-                    name="Moyenne Garéoult"
-                  />
-                )}
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+          renderCompareChart={(compData) => (
+            <ResponsiveContainer width="100%" height={300}>
+              <ComposedChart data={compData.current.data}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                <XAxis
+                  dataKey="label"
+                  stroke="#6b7280"
+                  tick={{ fill: '#6b7280', fontSize: 11 }}
+                />
+                <YAxis
+                  stroke="#6b7280"
+                  tick={{ fill: '#6b7280', fontSize: 12 }}
+                  label={{ value: 'km/h', angle: -90, position: 'insideLeft', fill: '#6b7280' }}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '4px'
+                  }}
+                />
+                {/* Courbe actuelle - bleue */}
+                <Line
+                  type="monotone"
+                  dataKey="wind_speed"
+                  stroke="#0ea5e9"
+                  strokeWidth={2}
+                  dot={false}
+                  name={`Vitesse (${compData.current.label})`}
+                />
+                {/* Courbe précédente - grise pointillée */}
+                <Line
+                  type="monotone"
+                  data={compData.previous.data}
+                  dataKey="wind_speed"
+                  stroke="#9ca3af"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={false}
+                  name={`Vitesse (${compData.previous.label})`}
+                />
               </ComposedChart>
             </ResponsiveContainer>
           )}
@@ -491,21 +503,16 @@ function App() {
           data={windHistory}
           period={windPeriod}
           setPeriod={setWindPeriod}
-          hideButtons={true}
+          compareMode={compareMode}
+          hideCompare={true}
           renderChart={(data) => (
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
-                  dataKey="time"
+                  dataKey="label"
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 11 }}
-                  tickFormatter={(value) => {
-                    if (windPeriod === 'daily') {
-                      return new Date(value).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-                    }
-                    return new Date(value).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
-                  }}
                 />
                 <YAxis
                   stroke="#6b7280"
@@ -542,20 +549,16 @@ function App() {
           data={rainHistory}
           period={rainPeriod}
           setPeriod={setRainPeriod}
+          compareMode={compareMode}
+          setCompareMode={setCompareMode}
           renderChart={(data) => (
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={data}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis
-                  dataKey="time"
+                  dataKey="label"
                   stroke="#6b7280"
                   tick={{ fill: '#6b7280', fontSize: 11 }}
-                  tickFormatter={(value) => {
-                    if (rainPeriod === 'daily') {
-                      return new Date(value).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-                    }
-                    return new Date(value).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })
-                  }}
                 />
                 <YAxis
                   stroke="#6b7280"
@@ -577,6 +580,48 @@ function App() {
               </ComposedChart>
             </ResponsiveContainer>
           )}
+          renderCompareChart={(compData) => {
+            // Fusionner les données pour afficher les barres côte à côte
+            const mergedData = compData.current.data.map((item, idx) => ({
+              ...item,
+              rain_current: item.rain,
+              rain_previous: compData.previous.data[idx]?.rain || 0
+            }))
+            return (
+              <ResponsiveContainer width="100%" height={300}>
+                <ComposedChart data={mergedData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis
+                    dataKey="label"
+                    stroke="#6b7280"
+                    tick={{ fill: '#6b7280', fontSize: 11 }}
+                  />
+                  <YAxis
+                    stroke="#6b7280"
+                    tick={{ fill: '#6b7280', fontSize: 12 }}
+                    label={{ value: 'mm', angle: -90, position: 'insideLeft', fill: '#6b7280' }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#ffffff',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '4px'
+                    }}
+                  />
+                  <Bar
+                    dataKey="rain_current"
+                    fill="#3b82f6"
+                    name={compData.current.label}
+                  />
+                  <Bar
+                    dataKey="rain_previous"
+                    fill="#9ca3af"
+                    name={compData.previous.label}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            )
+          }}
         />
 
         {/* Forecast */}
@@ -619,7 +664,6 @@ function Header({ data }) {
           <div className="text-gray-600 mt-1">Station {data.station_id}</div>
           <div className="mt-2 text-xs text-gray-500 space-y-0.5">
             <div>⟳ Données actuelles: 2 min</div>
-            <div>⟳ Stations voisines: 15 min</div>
             <div>⟳ Historique: 10 min</div>
           </div>
         </div>
@@ -753,8 +797,14 @@ function UVMetric({ data }) {
   )
 }
 
-function HistoryChart({ title, data, averageData, period, setPeriod, hideButtons, renderChart }) {
-  if (!data || !data.data || data.data.length === 0) {
+function HistoryChart({ title, data, period, setPeriod, compareMode, setCompareMode, hideCompare, renderChart, renderCompareChart }) {
+  // Vérifier si on a des données valides
+  const hasData = data && (
+    (data.compare && data.current?.data?.length > 0) ||
+    (!data.compare && data.data?.length > 0)
+  )
+
+  if (!hasData) {
     return (
       <div className="bg-white border border-gray-300 p-4 rounded-lg shadow-sm">
         <h2 className="text-gray-800 font-bold text-lg mb-4">{title}</h2>
@@ -763,35 +813,12 @@ function HistoryChart({ title, data, averageData, period, setPeriod, hideButtons
     )
   }
 
-  // Merge average data with main data if available
-  let mergedData = data.data
-  if (averageData && averageData.data && averageData.data.length > 0) {
-    // Create a map of average data by timestamp
-    const avgMap = {}
-    averageData.data.forEach(item => {
-      avgMap[item.time] = item
-    })
-
-    // Merge the data
-    mergedData = data.data.map(item => {
-      const avgItem = avgMap[item.time]
-      if (avgItem) {
-        return {
-          ...item,
-          temp_avg: avgItem.temp,
-          pressure_avg: avgItem.pressure,
-          wind_avg: avgItem.wind_speed
-        }
-      }
-      return item
-    })
-  }
-
   return (
     <div className="bg-white border border-gray-300 p-4 rounded-lg shadow-sm">
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-gray-800 font-bold text-lg">{title}</h2>
-        {!hideButtons && (
+        <div className="flex items-center gap-2">
+          {/* Boutons de période */}
           <div className="flex gap-2">
             <button
               onClick={() => setPeriod('daily')}
@@ -823,70 +850,57 @@ function HistoryChart({ title, data, averageData, period, setPeriod, hideButtons
             >
               30J
             </button>
+            <button
+              onClick={() => setPeriod('yearly')}
+              className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                period === 'yearly'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              Année
+            </button>
           </div>
-        )}
-      </div>
-      {renderChart(mergedData, averageData)}
-    </div>
-  )
-}
 
-function StationsTable({ stations }) {
-  if (!stations || !stations.stations || stations.stations.length === 0) {
-    return null
-  }
-
-  return (
-    <div className="bg-white border border-gray-300 p-4 rounded-lg shadow-sm">
-      <h2 className="text-gray-800 font-bold text-lg mb-4">Stations Garéoult - Comparaison</h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-gray-200">
-              <th className="text-left py-2 px-3 text-gray-700 font-semibold">ID</th>
-              <th className="text-left py-2 px-3 text-gray-700 font-semibold">Nom</th>
-              <th className="text-right py-2 px-3 text-gray-700 font-semibold">Temp (°C)</th>
-              <th className="text-right py-2 px-3 text-gray-700 font-semibold">Pression (hPa)</th>
-              <th className="text-right py-2 px-3 text-gray-700 font-semibold">Vent (km/h)</th>
-              <th className="text-right py-2 px-3 text-gray-700 font-semibold">Direction (°)</th>
-              <th className="text-right py-2 px-3 text-gray-700 font-semibold">Observation</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stations.stations.map((station, idx) => (
-              <tr
-                key={idx}
-                className={`border-b border-gray-100 ${station.is_main ? 'bg-blue-50' : 'hover:bg-gray-50'}`}
+          {/* Séparateur et bouton Comparer */}
+          {!hideCompare && setCompareMode && (
+            <>
+              <div className="w-px h-6 bg-gray-300 mx-2" />
+              <button
+                onClick={() => setCompareMode(!compareMode)}
+                className={`px-4 py-2 rounded text-sm font-medium transition-colors ${
+                  compareMode
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                }`}
               >
-                <td className="py-2 px-3">
-                  <span className={`font-mono text-xs ${station.is_main ? 'font-bold text-blue-700' : 'text-gray-600'}`}>
-                    {station.id}
-                  </span>
-                </td>
-                <td className="py-2 px-3 text-gray-800">
-                  {station.name || 'N/A'}
-                  {station.is_main && <span className="ml-2 text-xs text-blue-600 font-semibold">(Station principale)</span>}
-                </td>
-                <td className="py-2 px-3 text-right font-semibold text-blue-600">
-                  {station.temp != null ? station.temp.toFixed(1) : '--'}
-                </td>
-                <td className="py-2 px-3 text-right font-semibold text-purple-600">
-                  {station.pressure != null ? station.pressure.toFixed(1) : '--'}
-                </td>
-                <td className="py-2 px-3 text-right font-semibold text-cyan-600">
-                  {station.wind_speed != null ? station.wind_speed.toFixed(1) : '--'}
-                </td>
-                <td className="py-2 px-3 text-right font-semibold text-green-600">
-                  {station.wind_dir != null ? `${station.wind_dir}° (${getCardinalDirection(station.wind_dir)})` : '--'}
-                </td>
-                <td className="py-2 px-3 text-right text-xs text-gray-500">
-                  {station.observation_time ? new Date(station.observation_time).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '--'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                Comparer
+              </button>
+            </>
+          )}
+        </div>
       </div>
+
+      {/* Légende en mode comparaison */}
+      {compareMode && data.compare && data.current && data.previous && (
+        <div className="flex gap-4 mb-2 text-sm">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-0.5 bg-blue-500" />
+            <span className="text-gray-600">{data.current.label}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-0.5 bg-gray-400" style={{ borderTop: '2px dashed #9ca3af' }} />
+            <span className="text-gray-600">{data.previous.label}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Graphique */}
+      {compareMode && data.compare && renderCompareChart ? (
+        renderCompareChart(data)
+      ) : (
+        renderChart(data.compare ? data.current.data : data.data)
+      )}
     </div>
   )
 }
